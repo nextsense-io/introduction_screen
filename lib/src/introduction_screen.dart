@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
 import 'package:dots_indicator/dots_indicator.dart';
+import 'package:flutter/rendering.dart';
 import 'package:introduction_screen/src/helper.dart';
 import 'package:introduction_screen/src/model/page_view_model.dart';
 import 'package:introduction_screen/src/model/position.dart';
@@ -84,6 +85,11 @@ class IntroductionScreen extends StatefulWidget {
   ///
   /// @Default `true`
   final bool isProgressTap;
+
+  /// Callback when trying to go to next to know if allowed.
+  /// If the function returns true, it will progress, if false, it will not.
+  /// By default it will progress.
+  final bool Function()? canProgress;
 
   /// Is the user is allow to change page
   ///
@@ -227,6 +233,7 @@ class IntroductionScreen extends StatefulWidget {
     this.showBackButton = false,
     this.isProgress = true,
     this.isProgressTap = true,
+    this.canProgress,
     this.freeze = false,
     this.globalBackgroundColor,
     this.dotsDecorator = const DotsDecorator(),
@@ -323,7 +330,15 @@ class IntroductionScreenState extends State<IntroductionScreen> {
     return (widget.pages ?? widget.rawPages!).length;
   }
 
-  void next() => animateScroll(_currentPage.round() + 1);
+  bool canProgress() {
+    return widget.canProgress == null || widget.canProgress!.call();
+  }
+
+  void next() => {
+    if (canProgress()) {
+      animateScroll(_currentPage.round() + 1)
+    }
+  };
 
   void previous() => animateScroll(_currentPage.round() - 1);
 
@@ -336,6 +351,9 @@ class IntroductionScreenState extends State<IntroductionScreen> {
   }
 
   Future<void> skipToEnd() async {
+    if (!canProgress()) {
+      return;
+    }
     setState(() => _isSkipPressed = true);
     await animateScroll(getPagesLength() - 1);
     if (mounted) {
@@ -416,16 +434,35 @@ class IntroductionScreenState extends State<IntroductionScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: NotificationListener<ScrollNotification>(
+            child: GestureDetector(
+              onHorizontalDragEnd: (dragEndDetails) {
+                if (widget.freeze || widget.canProgress == null) {
+                  return;
+                }
+                if (dragEndDetails.primaryVelocity! < 0) {
+                  if (widget.rtl) {
+                    previous();
+                  } else {
+                    next();
+                  }
+                } else if (dragEndDetails.primaryVelocity! > 0) {
+                  if (widget.rtl) {
+                    next();
+                  } else {
+                    previous();
+                  }
+                }
+              },
+              child: NotificationListener<ScrollNotification>(
               onNotification: _onScroll,
               child: PageView(
                 reverse: widget.rtl,
                 scrollDirection: widget.pagesAxis,
                 controller: _pageController,
                 onPageChanged: widget.onChange,
-                physics: widget.freeze
-                    ? const NeverScrollableScrollPhysics()
-                    : widget.scrollPhysics,
+                physics: widget.freeze || widget.canProgress != null ?
+                    const NeverScrollableScrollPhysics() :
+                    widget.scrollPhysics,
                 children: widget.pages
                         ?.mapIndexed(
                           (index, page) => IntroPage(
@@ -440,7 +477,7 @@ class IntroductionScreenState extends State<IntroductionScreen> {
                     widget.rawPages!,
               ),
             ),
-          ),
+          )),
           if (widget.globalHeader != null)
             Positioned(
               top: 0,
@@ -473,17 +510,20 @@ class IntroductionScreenState extends State<IntroductionScreen> {
                                   label:
                                       "Page ${_currentPage.round() + 1} of ${getPagesLength()}",
                                   excludeSemantics: true,
-                                  child: DotsIndicator(
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+
+                                    child: DotsIndicator(
                                     reversed: widget.rtl,
                                     dotsCount: getPagesLength(),
                                     position: _currentPage,
                                     decorator: widget.dotsDecorator,
                                     onTap: widget.isProgressTap &&
-                                            !widget.freeze
+                                            !widget.freeze && canProgress()
                                         ? (pos) => animateScroll(pos.toInt())
                                         : null,
                                   ),
-                                )
+                                ))
                               : const SizedBox(),
                         ),
                       ),
